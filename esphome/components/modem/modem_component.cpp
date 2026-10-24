@@ -1129,11 +1129,21 @@ void ModemComponent::set_gnss(bool state) {
 }
 
 void ModemComponent::apply_gnss_(bool on) {
-  const char *cmd = strcmp(this->model_, "SIM7600") == 0 ? (on ? "AT+CGPS=1" : "AT+CGPS=0")
-                                                         : (on ? "AT+CGNSSPWR=1" : "AT+CGNSSPWR=0");
-  if (this->at_(cmd) != command_result::OK) {
-    this->gnss_request_.fetch_or(GNSS_DIRTY, std::memory_order_acq_rel);  // sent again on the next pass
+  const bool sim7600 = strcmp(this->model_, "SIM7600") == 0;
+  const char *cmd = sim7600 ? (on ? "AT+CGPS=1" : "AT+CGPS=0") : (on ? "AT+CGNSSPWR=1" : "AT+CGNSSPWR=0");
+  if (this->at_(cmd) == command_result::OK) {
+    return;
   }
+  // The SIM7600 answers ERROR to AT+CGPS=1 while a session already runs, so a refusal is fine when the modem is
+  // already where it was asked to be
+  std::string output;
+  const char *colon = nullptr;
+  if (this->dce_->at(sim7600 ? "AT+CGPS?" : "AT+CGNSSPWR?", output, COMMAND_TIMEOUT_MS) == command_result::OK &&
+      (colon = strchr(output.c_str(), ':')) != nullptr && (atoi(colon + 1) != 0) == on) {
+    ESP_LOGD(TAG, "GNSS already %s", on ? "on" : "off");
+    return;
+  }
+  this->gnss_request_.fetch_or(GNSS_DIRTY, std::memory_order_acq_rel);  // sent again on the next pass
 }
 #endif
 
