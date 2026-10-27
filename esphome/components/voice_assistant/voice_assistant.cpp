@@ -635,6 +635,9 @@ void VoiceAssistant::set_state_after_mic_stop_(State state) {
     // loop() moves to the desired state once the microphone has stopped
     this->desired_state_ = state;
     ESP_LOGD(TAG, "Desired state set to %s", LOG_STR_ARG(voice_assistant_state_to_string(state)));
+  } else if (this->state_ == State::STREAMING_MICROPHONE) {
+    // Streaming STT engines send the result without a VAD end event, so the microphone is still running
+    this->set_state_(State::STOP_MICROPHONE, state);
   } else if (state != this->state_) {
     this->set_state_(state, state);
   }
