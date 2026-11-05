@@ -44,6 +44,10 @@
 #include <esp_netif_net_stack.h>
 #include "lwip/dhcp6.h"
 #endif
+#if USE_NETWORK_IPV6
+#include <esp_netif_net_stack.h>  // esp_netif_get_netif_impl()
+#include "lwip/netif.h"
+#endif
 #ifdef USE_WIFI_LEASE_CACHE
 #include <esp_netif_net_stack.h>  // esp_netif_get_netif_impl()
 #include <esp_rtc_time.h>         // esp_rtc_get_time_us() -- RTC-domain clock for lease age
@@ -1078,8 +1082,12 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
     s_sta_connected = true;
 #if USE_NETWORK_IPV6
     // Start SLAAC on association, not after a DHCPv4 lease that may never arrive.
-    if (esp_err_t ll_err = esp_netif_create_ip6_linklocal(s_sta_netif); ll_err != ESP_OK) {
-      ESP_LOGW(TAG, "esp_netif_create_ip6_linklocal failed: %s", esp_err_to_name(ll_err));
+    // Not esp_netif_create_ip6_linklocal(): it fails while the netif is still down, and this event can be
+    // handled before esp-netif's own STA_CONNECTED handler brings it up. lwIP accepts the address on a down
+    // netif and starts DAD/router solicitation once it is up.
+    if (auto *netif = static_cast<struct netif *>(esp_netif_get_netif_impl(s_sta_netif)); netif != nullptr) {
+      LwIPLock lock;
+      netif_create_ip6_linklocal_address(netif, 1);
     }
 #if !USE_NETWORK_IPV4 && LWIP_IPV6_DHCP6
     // Without DHCPv4, DNS servers come from RDNSS or stateless DHCPv6; esp_netif never starts the latter
