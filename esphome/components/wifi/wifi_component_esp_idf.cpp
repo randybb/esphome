@@ -1082,12 +1082,19 @@ void WiFiComponent::wifi_process_event_(IDFWiFiEvent *data) {
     s_sta_connected = true;
 #if USE_NETWORK_IPV6
     // Start SLAAC on association, not after a DHCPv4 lease that may never arrive.
-    // Not esp_netif_create_ip6_linklocal(): it fails while the netif is still down, and this event can be
-    // handled before esp-netif's own STA_CONNECTED handler brings it up. lwIP accepts the address on a down
-    // netif and starts DAD/router solicitation once it is up.
+    // Not esp_netif_create_ip6_linklocal(): it returns ESP_FAIL while the netif is down, and this queued event
+    // can be handled before esp-netif's own STA_CONNECTED handler brings the netif up. lwIP accepts the
+    // address on a down netif and starts DAD and router solicitation once it comes up.
     if (auto *netif = static_cast<struct netif *>(esp_netif_get_netif_impl(s_sta_netif)); netif != nullptr) {
-      LwIPLock lock;
-      netif_create_ip6_linklocal_address(netif, 1);
+      esp_netif_tcpip_exec(
+          [](void *ctx) -> esp_err_t {
+            netif_create_ip6_linklocal_address(static_cast<struct netif *>(ctx), 1);
+            return ESP_OK;
+          },
+          netif);
+      ESP_LOGD(TAG, "IPv6 link-local address created");
+    } else {
+      ESP_LOGW(TAG, "No lwIP netif, IPv6 link-local not created");
     }
 #if !USE_NETWORK_IPV4 && LWIP_IPV6_DHCP6
     // Without DHCPv4, DNS servers come from RDNSS or stateless DHCPv6; esp_netif never starts the latter
